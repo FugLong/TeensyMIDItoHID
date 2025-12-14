@@ -1,0 +1,52 @@
+# 36-Key Mode Mappings for Where Winds Meet
+# Based on the open source WWM MIDI Player mappings
+# 
+# Format: MIDI_NOTE=KEY_NAME
+# Natural notes use normal keys, accidentals use Shift/Ctrl modifiers
+#
+# Octave layout:
+# Low octave (C3-B3):  z, x, c, v, b, n, m
+# Mid octave (C4-B4):  a, s, d, f, g, h, j  
+# High octave (C5-B5): q, w, e, r, t, y, u
+
+# Low Octave (C3-B3): MIDI notes 48-59
+48=z      # C3
+49=SHIFT+Z  # C#3
+50=x      # D3
+51=CTRL+C  # D#3/Eb3
+52=c      # E3
+53=v      # F3
+54=SHIFT+V  # F#3
+55=b      # G3
+56=SHIFT+B  # G#3
+57=n      # A3
+58=CTRL+M  # A#3/Bb3
+59=m      # B3
+
+# Mid Octave (C4-B4): MIDI notes 60-71
+60=a      # C4 (Middle C)
+61=SHIFT+A  # C#4
+62=s      # D4
+63=CTRL+D  # D#4/Eb4
+64=d      # E4
+65=f      # F4
+66=SHIFT+F  # F#4
+67=g      # G4
+68=SHIFT+G  # G#4
+69=h      # A4
+70=CTRL+J  # A#4/Bb4
+71=j      # B4
+
+# High Octave (C5-B5): MIDI notes 72-83
+72=q      # C5
+73=SHIFT+Q  # C#5
+74=w      # D5
+75=CTRL+E  # D#5/Eb5
+76=e      # E5
+77=r      # F5
+78=SHIFT+R  # F#5
+79=t      # G5
+80=SHIFT+T  # G#5
+81=y      # A5
+82=CTRL+U  # A#5/Bb5
+83=u      # B5
