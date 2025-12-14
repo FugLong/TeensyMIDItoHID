@@ -8,7 +8,7 @@ A hardware-based MIDI to keyboard translator for Teensy 4.1 that allows you to u
 
 ![Enclosure Model](images/3dModelScreenShot.png)
 
-**[View on Onshape](https://cad.onshape.com/documents/d447ba38ceae90fc1a025caa/w/b02970f7e3dbf0d5ded550ad/e/2d1d9289cd4d8826bf3fcb10?renderMode=0&uiState=693ef2ecd4744c235e894ded)**
+<a href="https://cad.onshape.com/documents/d447ba38ceae90fc1a025caa/w/b02970f7e3dbf0d5ded550ad/e/2d1d9289cd4d8826bf3fcb10?renderMode=0&uiState=693ef2ecd4744c235e894ded" target="_blank" style="display: inline-block; padding: 8px 16px; background-color: #238636; color: white; text-decoration: none; border-radius: 6px; font-weight: 500; font-size: 14px; border: 1px solid rgba(27, 31, 36, 0.15); transition: background-color 0.2s;">📐 View on Onshape</a>
 
 ## Hardware Setup
 
