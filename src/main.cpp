@@ -25,9 +25,15 @@
 #include <SPI.h>
 #include "MidiConfig.h"
 
-// USB MIDI Host
+// USB MIDI Host - support up to 4 MIDI devices
 USBHost myusb;
+// USB Hub support (needed when using a USB hub)
+USBHub hub1(myusb);
+USBHub hub2(myusb);
 MIDIDevice midi1(myusb);
+MIDIDevice midi2(myusb);
+MIDIDevice midi3(myusb);
+MIDIDevice midi4(myusb);
 
 // Structure to store key mapping with modifier
 struct KeyMapping {
@@ -77,10 +83,14 @@ void addPressedKey(byte keyCode, byte modifierMask);
 void removePressedKey(byte keyCode, byte modifierMask);
 void updateKeyboardState();
 void handleFastPress();
+void processMidiMessage(MIDIDevice& midi, int deviceNum);
 
 void setup() {
   // Initialize USB Host
   myusb.begin();
+  
+  // Give USB Host time to initialize, especially important for hubs
+  delay(500);
   
   // Initialize SD card
   if (!SD.begin(BUILTIN_SDCARD)) {
@@ -89,7 +99,7 @@ void setup() {
     noteToKey[60].modifierMask = 0;
     noteToKey[58].keyCode = KEY_G;
     noteToKey[58].modifierMask = 0;
-    delay(1000);  // Give USB time to initialize
+    delay(2000);  // Give USB Host more time to enumerate devices, especially with hubs
     return;
   }
   
@@ -99,10 +109,19 @@ void setup() {
   // Load mappings from mapping file (WWM36_MAPPINGS.TXT, WWM21_MAPPINGS.TXT, or MAPPINGS.TXT)
   loadMappings();
   
-  delay(1000);  // Wait for USB keyboard to initialize
+  // Allow time for USB Host to enumerate devices (hubs may take longer)
+  // Run USB Task multiple times to ensure hubs and devices are detected
+  for (int i = 0; i < 20; i++) {
+    myusb.Task();
+    delay(50);  // Reduced delay for faster enumeration
+  }
+  
+  delay(500);  // Wait for USB keyboard to initialize
 }
 
 void loop() {
+  // USB Task must be called frequently for proper device communication
+  // This is especially important with hubs that may buffer or delay messages
   myusb.Task();
   
   // Handle fast-press mode timing
@@ -110,53 +129,76 @@ void loop() {
     handleFastPress();
   }
   
-  // Check for MIDI messages
-  if (midi1.read()) {
-    byte type = midi1.getType();
-    byte note = midi1.getData1();
-    byte velocity = midi1.getData2();
-    
-    if (type == midi1.NoteOn && velocity > 0) {
-      // Note On
-      KeyMapping mapping = noteToKey[note];
-      if (mapping.keyCode > 0) {
-        if (config.fastPressMode) {
-          // Fast press mode: send quick press/release
-          if (config.pressDurationMs == 0) {
-            // Immediate press/release (like open source player)
-            addPressedKey(mapping.keyCode, mapping.modifierMask);
-            updateKeyboardState();
-            // Release immediately
-            removePressedKey(mapping.keyCode, mapping.modifierMask);
-            updateKeyboardState();
-          } else {
-            // Timed press/release (for longer durations)
-            addPressedKey(mapping.keyCode, mapping.modifierMask);
-            updateKeyboardState();
-            
-            // Schedule release after pressDurationMs
-            if (fastPressKeyCount < MAX_SIMULTANEOUS_KEYS) {
-              fastPressTimers[fastPressKeyCount].keyCode = mapping.keyCode;
-              fastPressTimers[fastPressKeyCount].modifierMask = mapping.modifierMask;
-              fastPressTimers[fastPressKeyCount].releaseTime = millis() + config.pressDurationMs;
-              fastPressKeyCount++;
-            }
-          }
-        } else {
-          // Normal mode: hold key until NoteOff
+  // Check for MIDI messages from all 4 possible MIDI devices
+  // This ensures we catch messages regardless of which device instance the controller uses
+  // With hubs, devices may enumerate on different instances, so check all
+  // Only check devices that are connected (using the bool operator)
+  if (midi1 && midi1.read()) {
+    processMidiMessage(midi1, 1);
+  }
+  if (midi2 && midi2.read()) {
+    processMidiMessage(midi2, 2);
+  }
+  if (midi3 && midi3.read()) {
+    processMidiMessage(midi3, 3);
+  }
+  if (midi4 && midi4.read()) {
+    processMidiMessage(midi4, 4);
+  }
+  
+  // Small delay to prevent tight loop (helps with hub communication)
+  delayMicroseconds(100);
+}
+
+// Process MIDI message from any MIDI device (handles all MIDI channels)
+void processMidiMessage(MIDIDevice& midi, int deviceNum) {
+  byte type = midi.getType();
+  byte note = midi.getData1();
+  byte velocity = midi.getData2();
+  
+  // Accept all MIDI channels (0-15) - no channel filtering
+  // The USBHost_t36 library handles channel messages automatically
+  
+  if (type == midi.NoteOn && velocity > 0) {
+    // Note On
+    KeyMapping mapping = noteToKey[note];
+    if (mapping.keyCode > 0) {
+      if (config.fastPressMode) {
+        // Fast press mode: send quick press/release
+        if (config.pressDurationMs == 0) {
+          // Immediate press/release (like open source player)
           addPressedKey(mapping.keyCode, mapping.modifierMask);
           updateKeyboardState();
+          // Release immediately
+          removePressedKey(mapping.keyCode, mapping.modifierMask);
+          updateKeyboardState();
+        } else {
+          // Timed press/release (for longer durations)
+          addPressedKey(mapping.keyCode, mapping.modifierMask);
+          updateKeyboardState();
+          
+          // Schedule release after pressDurationMs
+          if (fastPressKeyCount < MAX_SIMULTANEOUS_KEYS) {
+            fastPressTimers[fastPressKeyCount].keyCode = mapping.keyCode;
+            fastPressTimers[fastPressKeyCount].modifierMask = mapping.modifierMask;
+            fastPressTimers[fastPressKeyCount].releaseTime = millis() + config.pressDurationMs;
+            fastPressKeyCount++;
+          }
         }
-      }
-    }
-    else if (type == midi1.NoteOff || (type == midi1.NoteOn && velocity == 0)) {
-      // Note Off
-      KeyMapping mapping = noteToKey[note];
-      if (mapping.keyCode > 0 && !config.fastPressMode) {
-        // Only handle NoteOff in normal mode (fast mode uses timers)
-        removePressedKey(mapping.keyCode, mapping.modifierMask);
+      } else {
+        // Normal mode: hold key until NoteOff
+        addPressedKey(mapping.keyCode, mapping.modifierMask);
         updateKeyboardState();
       }
+    }
+  }
+  else if (type == midi.NoteOff || (type == midi.NoteOn && velocity == 0)) {
+    // Note Off
+    KeyMapping mapping = noteToKey[note];
+    if (mapping.keyCode > 0 && !config.fastPressMode) {
+      // Only handle NoteOff in normal mode (fast mode uses timers)
+      removePressedKey(mapping.keyCode, mapping.modifierMask);
+      updateKeyboardState();
     }
   }
 }
@@ -539,3 +581,4 @@ void updateKeyboardState() {
     }
   }
 }
+
