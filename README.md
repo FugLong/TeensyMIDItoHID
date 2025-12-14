@@ -1,6 +1,6 @@
 # Teensy MIDI to HID Keyboard Translator
 
-A hardware-based MIDI to keyboard translator for Teensy 4.1 that allows you to use MIDI instruments in video games without any software on your gaming PC. To your PC this device just appears as a genric USB keyboard!
+A hardware-based MIDI to keyboard translator for Teensy 4.1 that allows you to use MIDI instruments in video games without any software on your gaming PC. To your PC this device just appears as a generic USB keyboard!
 
 ### Finished Product
 
