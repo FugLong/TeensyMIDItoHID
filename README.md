@@ -16,9 +16,11 @@ A hardware-based MIDI to keyboard translator for Teensy 4.1 that allows you to u
 
 - **Teensy 4.1** microcontroller
 - **3D Printed USB Case/Enclosure** (recommended) - see enclosure design above
-- **USB Host Port** (female USB A) - connects to MIDI devices
+- **USB Host Port** (female USB A) - **⚠️ REQUIRED: Must be soldered to USB Host pins on Teensy 4.1** - connects to MIDI devices
 - **USB Device Port** (micro USB) - connects to gaming PC
 - **SD Card** (optional, for configuration) - insert into Teensy SD card slot
+
+> **Important:** The Teensy 4.1 does not have a built-in USB Host port. You must solder a female USB A port to the USB Host pins on the Teensy board. The USB Host pins are located on the bottom of the Teensy 4.1 board.
 
 ## Features
 
@@ -97,8 +99,9 @@ If you prefer Arduino IDE:
   - See `sd_card/` folder for example files and `mappings/` folder for templates
 
 **Step 3: Setup hardware**
+- **⚠️ IMPORTANT:** Ensure you have soldered a female USB A port to the USB Host pins on your Teensy 4.1 (if not already done)
 - Insert the prepared SD card into Teensy 4.1 SD card slot
-- Connect your MIDI device to the USB Host port (female USB A) on Teensy
+- Connect your MIDI device to the soldered USB Host port (female USB A) on Teensy
 - Connect Teensy to your computer via micro USB cable
 
 **Step 4: Power on**
@@ -109,7 +112,7 @@ See the `sd_card/` folder for example files and `mappings/` folder for mapping t
 ## How It Works
 
 1. **On startup:** Teensy reads `CONFIG.TXT` and mapping file from SD card
-2. **MIDI input:** MIDI devices connect to USB Host port, Teensy receives Note On/Off messages
+2. **MIDI input:** MIDI devices connect to the soldered USB Host port, Teensy receives Note On/Off messages
 3. **Mapping lookup:** Code looks up the configured mapping for each MIDI note
 4. **Key output:** Keyboard key presses/releases are sent via USB HID to the PC
 5. **Fast-press mode:** If enabled, keys are pressed/released quickly (configurable duration)
