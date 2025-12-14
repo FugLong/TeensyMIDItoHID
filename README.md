@@ -2,6 +2,10 @@
 
 A hardware-based MIDI to keyboard translator for Teensy 4.1 that allows you to use MIDI instruments in video games without any software on your gaming PC. To your PC this device just appears as a genric USB keyboard!
 
+### Finished Product
+
+<img src="images/FinishedPic1.jpeg" alt="Finished Product 1" width="300"/> <img src="images/FinishedPic2.jpeg" alt="Finished Product 2" width="300"/>
+
 ![Working Picture](images/WorkingPic.jpeg)
 
 ## 3D Printed Dongle Enclosure
@@ -21,6 +25,12 @@ A hardware-based MIDI to keyboard translator for Teensy 4.1 that allows you to u
 - **SD Card** (optional, for configuration) - insert into Teensy SD card slot
 
 > **Important:** The Teensy 4.1 does not have a built-in USB Host port. You must solder a female USB A port to the USB Host pins on the Teensy board. The USB Host pins are located on the bottom of the Teensy 4.1 board.
+
+## Assembly Instructions
+
+Follow these steps to assemble your MIDI to HID translator (everything just slides together):
+
+<img src="images/BuildPic1.jpeg" alt="Build Step 1" width="200"/> <img src="images/BuildPic2.jpeg" alt="Build Step 2" width="200"/> <img src="images/BuildPic3.jpeg" alt="Build Step 3" width="200"/> <img src="images/BuildPic4.jpeg" alt="Build Step 4" width="200"/> <img src="images/BuildPic5.jpeg" alt="Build Step 5" width="200"/>
 
 ## Features
 
