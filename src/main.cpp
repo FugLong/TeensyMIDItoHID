@@ -41,18 +41,31 @@ struct KeyMapping {
   byte modifierMask; // Modifier mask (SHIFT, CTRL, etc.)
 };
 
-// MIDI note -> Key mapping with modifiers
-KeyMapping noteToKey[MAX_MIDI_NOTES];  // 128 MIDI notes (0-127)
+// Structure to store a profile (set of mappings)
+struct Profile {
+  String name;                              // Profile name (e.g., "default", "touchscreen")
+  KeyMapping noteToKey[MAX_MIDI_NOTES];     // 128 MIDI notes (0-127)
+  bool isValid;                              // True if profile has been loaded
+  bool fastPressMode;                        // Fast-press mode for this profile (overrides global config)
+  unsigned int pressDurationMs;              // Press duration for this profile (overrides global config)
+};
+
+// Multiple profiles support
+Profile profiles[MAX_PROFILES];
+byte profileCount = 0;                      // Number of profiles loaded
+byte currentProfileIndex = 0;                // Index of currently active profile
 
 // Configuration settings
 struct Config {
   bool fastPressMode;     // If true, send quick press/release regardless of MIDI duration
   unsigned int pressDurationMs;  // Duration for fast press mode (milliseconds)
+  byte profileSwitchNote; // MIDI note to trigger profile switching (default: 12 = C0)
 };
 
 Config config = {
   .fastPressMode = true,      // Default: fast press mode enabled
-  .pressDurationMs = 0        // Default: 0ms = immediate press/release (like open source player)
+  .pressDurationMs = 0,       // Default: 0ms = immediate press/release (like open source player)
+  .profileSwitchNote = PROFILE_SWITCH_NOTE  // Default: C1 = note 24 (configurable via CONFIG.TXT)
 };
 
 // Polyphony support: Track simultaneously pressed keys with modifiers
@@ -64,6 +77,10 @@ struct PressedKey {
 
 PressedKey pressedKeys[MAX_SIMULTANEOUS_KEYS];
 byte pressedKeyCount = 0;  // Number of keys currently pressed
+
+// Track modifier-only keys separately (LSHIFT, RSHIFT, etc. as standalone keys)
+// This prevents modifier changes from causing other keys to replay
+byte activeModifierKeys = 0;  // Combined modifier mask from modifier-only keys
 
 // For fast-press mode: track keys that need timed release
 struct FastPressTimer {
@@ -79,6 +96,7 @@ byte fastPressKeyCount = 0;
 bool parseKeyMapping(String keyName, byte& keyCode, byte& modifierMask);
 void loadConfig();
 void loadMappings();
+void switchProfile(byte profileIndex);
 void addPressedKey(byte keyCode, byte modifierMask);
 void removePressedKey(byte keyCode, byte modifierMask);
 void updateKeyboardState();
@@ -86,19 +104,46 @@ void handleFastPress();
 void processMidiMessage(MIDIDevice& midi, int deviceNum);
 
 void setup() {
+  // Initialize Serial for debugging (only if ENABLE_DEBUG is defined)
+  #ifdef ENABLE_DEBUG
+  Serial.begin(115200);
+  delay(1000);  // Give Serial time to initialize
+  Serial.println("=== Teensy MIDI to HID Translator ===");
+  #endif
+  
   // Initialize USB Host
   myusb.begin();
   
   // Give USB Host time to initialize, especially important for hubs
   delay(500);
   
+  // Initialize profiles
+  profileCount = 0;
+  currentProfileIndex = 0;
+  for (int i = 0; i < MAX_PROFILES; i++) {
+    profiles[i].name = "";
+    profiles[i].isValid = false;
+    profiles[i].fastPressMode = config.fastPressMode;  // Default to global config
+    profiles[i].pressDurationMs = config.pressDurationMs;  // Default to global config
+    for (int j = 0; j < MAX_MIDI_NOTES; j++) {
+      profiles[i].noteToKey[j].keyCode = 0;
+      profiles[i].noteToKey[j].modifierMask = 0;
+    }
+  }
+  
   // Initialize SD card
   if (!SD.begin(BUILTIN_SDCARD)) {
     // SD card failed - use hardcoded fallback mappings for testing
-    noteToKey[60].keyCode = KEY_H;
-    noteToKey[60].modifierMask = 0;
-    noteToKey[58].keyCode = KEY_G;
-    noteToKey[58].modifierMask = 0;
+    profiles[0].name = "default";
+    profiles[0].isValid = true;
+    profiles[0].fastPressMode = config.fastPressMode;
+    profiles[0].pressDurationMs = config.pressDurationMs;
+    profiles[0].noteToKey[60].keyCode = KEY_H;
+    profiles[0].noteToKey[60].modifierMask = 0;
+    profiles[0].noteToKey[58].keyCode = KEY_G;
+    profiles[0].noteToKey[58].modifierMask = 0;
+    profileCount = 1;
+    currentProfileIndex = 0;
     delay(2000);  // Give USB Host more time to enumerate devices, especially with hubs
     return;
   }
@@ -106,7 +151,7 @@ void setup() {
   // Load configuration from CONFIG.TXT
   loadConfig();
   
-  // Load mappings from mapping file (WWM36_MAPPINGS.TXT, WWM21_MAPPINGS.TXT, or MAPPINGS.TXT)
+  // Load all mapping files from SD card (each file becomes one profile)
   loadMappings();
   
   // Allow time for USB Host to enumerate devices (hubs may take longer)
@@ -124,8 +169,8 @@ void loop() {
   // This is especially important with hubs that may buffer or delay messages
   myusb.Task();
   
-  // Handle fast-press mode timing
-  if (config.fastPressMode) {
+  // Handle fast-press mode timing (use current profile's setting)
+  if (profiles[currentProfileIndex].isValid && profiles[currentProfileIndex].fastPressMode) {
     handleFastPress();
   }
   
@@ -159,13 +204,82 @@ void processMidiMessage(MIDIDevice& midi, int deviceNum) {
   // Accept all MIDI channels (0-15) - no channel filtering
   // The USBHost_t36 library handles channel messages automatically
   
+  // Debug: Log all MIDI messages
+  #ifdef ENABLE_DEBUG
+  if (type == midi.NoteOn || type == midi.NoteOff) {
+    Serial.print("MIDI: ");
+    Serial.print(type == midi.NoteOn ? "NoteOn" : "NoteOff");
+    Serial.print(" note=");
+    Serial.print(note);
+    Serial.print(" velocity=");
+    Serial.println(velocity);
+  }
+  #endif
+  
+  // Check for profile switch note (configurable, default: C1 = note 24)
+  // Note: 255 disables profile switching
+  if (config.profileSwitchNote < 255 && type == midi.NoteOn && velocity > 0 && note == config.profileSwitchNote) {
+    #ifdef ENABLE_DEBUG
+    Serial.print("Profile switch note received (note ");
+    Serial.print(note);
+    Serial.print("), current profile count: ");
+    Serial.println(profileCount);
+    #endif
+    
+    // Switch to next profile
+    if (profileCount > 1) {
+      byte nextProfile = (currentProfileIndex + 1) % profileCount;
+      #ifdef ENABLE_DEBUG
+      Serial.print("Switching from profile ");
+      Serial.print(currentProfileIndex);
+      Serial.print(" (");
+      Serial.print(profiles[currentProfileIndex].name);
+      Serial.print(") to profile ");
+      Serial.print(nextProfile);
+      Serial.print(" (");
+      Serial.print(profiles[nextProfile].name);
+      Serial.println(")");
+      #endif
+      switchProfile(nextProfile);
+    } else {
+      #ifdef ENABLE_DEBUG
+      Serial.println("ERROR: Only 1 profile loaded - cannot switch! Need multiple mapping files on SD card.");
+      #endif
+    }
+    return;  // Don't process profile switch note as a regular key
+  }
+  
   if (type == midi.NoteOn && velocity > 0) {
     // Note On
-    KeyMapping mapping = noteToKey[note];
-    if (mapping.keyCode > 0) {
-      if (config.fastPressMode) {
+    KeyMapping mapping = profiles[currentProfileIndex].noteToKey[note];
+    // Process if there's a key code OR a modifier (for modifier-only keys like LSHIFT/RSHIFT)
+    if (mapping.keyCode > 0 || mapping.modifierMask > 0) {
+      #ifdef ENABLE_DEBUG
+      Serial.print("Key press: note ");
+      Serial.print(note);
+      Serial.print(" -> keyCode ");
+      Serial.print(mapping.keyCode);
+      Serial.print(" (profile: ");
+      Serial.print(profiles[currentProfileIndex].name);
+      Serial.println(")");
+      #endif
+      
+      // Check if this is a modifier-only key (keyCode=0, modifierMask>0)
+      if (mapping.keyCode == 0 && mapping.modifierMask > 0) {
+        // Modifier-only key (LSHIFT, RSHIFT, etc.) - handle separately to avoid replaying other keys
+        activeModifierKeys |= mapping.modifierMask;
+        updateKeyboardState();
+        return;  // Don't process as regular key
+      }
+      
+      // Regular key (with or without modifier)
+      // Use current profile's fast-press mode setting
+      bool profileFastPress = profiles[currentProfileIndex].fastPressMode;
+      unsigned int profileDuration = profiles[currentProfileIndex].pressDurationMs;
+      
+      if (profileFastPress) {
         // Fast press mode: send quick press/release
-        if (config.pressDurationMs == 0) {
+        if (profileDuration == 0) {
           // Immediate press/release (like open source player)
           addPressedKey(mapping.keyCode, mapping.modifierMask);
           updateKeyboardState();
@@ -181,7 +295,7 @@ void processMidiMessage(MIDIDevice& midi, int deviceNum) {
           if (fastPressKeyCount < MAX_SIMULTANEOUS_KEYS) {
             fastPressTimers[fastPressKeyCount].keyCode = mapping.keyCode;
             fastPressTimers[fastPressKeyCount].modifierMask = mapping.modifierMask;
-            fastPressTimers[fastPressKeyCount].releaseTime = millis() + config.pressDurationMs;
+            fastPressTimers[fastPressKeyCount].releaseTime = millis() + profileDuration;
             fastPressKeyCount++;
           }
         }
@@ -194,11 +308,25 @@ void processMidiMessage(MIDIDevice& midi, int deviceNum) {
   }
   else if (type == midi.NoteOff || (type == midi.NoteOn && velocity == 0)) {
     // Note Off
-    KeyMapping mapping = noteToKey[note];
-    if (mapping.keyCode > 0 && !config.fastPressMode) {
-      // Only handle NoteOff in normal mode (fast mode uses timers)
-      removePressedKey(mapping.keyCode, mapping.modifierMask);
-      updateKeyboardState();
+    KeyMapping mapping = profiles[currentProfileIndex].noteToKey[note];
+    // Process if there's a key code OR a modifier (for modifier-only keys like LSHIFT/RSHIFT)
+    if (mapping.keyCode > 0 || mapping.modifierMask > 0) {
+      // Check if this is a modifier-only key (keyCode=0, modifierMask>0)
+      if (mapping.keyCode == 0 && mapping.modifierMask > 0) {
+        // Modifier-only key release - handle separately to avoid replaying other keys
+        activeModifierKeys &= ~mapping.modifierMask;
+        updateKeyboardState();
+        return;  // Don't process as regular key
+      }
+      
+      // Regular key release
+      // Use current profile's fast-press mode setting
+      bool profileFastPress = profiles[currentProfileIndex].fastPressMode;
+      if (!profileFastPress) {
+        // Only handle NoteOff in normal mode (fast mode uses timers)
+        removePressedKey(mapping.keyCode, mapping.modifierMask);
+        updateKeyboardState();
+      }
     }
   }
 }
@@ -240,37 +368,75 @@ void loadConfig() {
           config.pressDurationMs = duration;
         }
       }
+      else if (setting == "PROFILE_SWITCH_NOTE" || setting == "PROFILE_SWITCH" || setting == "SWITCH_NOTE") {
+        int note = value.toInt();
+        // Valid range: 0-127 (MIDI note range), or 255 to disable
+        if ((note >= 0 && note < MAX_MIDI_NOTES) || note == 255) {
+          config.profileSwitchNote = note;
+        }
+      }
     }
   }
   file.close();
 }
 
-// Load mappings from first .txt file found that contains "MAPPINGS" in filename (case-insensitive)
-// This allows users to name their mapping files however they want (e.g., "MY_GAME_MAPPINGS.txt", "mappings.txt")
+// Switch to a different profile
+void switchProfile(byte profileIndex) {
+  if (profileIndex < profileCount && profiles[profileIndex].isValid) {
+    currentProfileIndex = profileIndex;
+    // Release all currently pressed keys when switching profiles
+    for (int i = pressedKeyCount - 1; i >= 0; i--) {
+      removePressedKey(pressedKeys[i].keyCode, pressedKeys[i].modifierMask);
+    }
+    // Clear modifier-only keys
+    activeModifierKeys = 0;
+    updateKeyboardState();
+    // Clear fast press timers
+    fastPressKeyCount = 0;
+  }
+}
+
+// Load all mapping files from SD card root directory
+// Each .txt file containing "MAPPINGS" in its name becomes one profile
+// Profile name is derived from the filename (without .txt extension)
+// Pressing the profile switch note cycles through all loaded mapping files
 void loadMappings() {
-  // Initialize all mappings to unmapped (keyCode = 0 means unmapped)
-  for (int i = 0; i < MAX_MIDI_NOTES; i++) {
-    noteToKey[i].keyCode = 0;
-    noteToKey[i].modifierMask = 0;
+  // Initialize all profiles
+  profileCount = 0;
+  currentProfileIndex = 0;
+  for (int i = 0; i < MAX_PROFILES; i++) {
+    profiles[i].name = "";
+    profiles[i].isValid = false;
+    for (int j = 0; j < MAX_MIDI_NOTES; j++) {
+      profiles[i].noteToKey[j].keyCode = 0;
+      profiles[i].noteToKey[j].modifierMask = 0;
+    }
   }
   
-  // Open root directory and search for mapping files
+  // Open root directory and search for all mapping files
   File root = SD.open("/");
   if (!root) {
     // SD card root not accessible - use fallback test mappings
-    noteToKey[60].keyCode = KEY_H;
-    noteToKey[60].modifierMask = 0;
-    noteToKey[58].keyCode = KEY_G;
-    noteToKey[58].modifierMask = 0;
+    profiles[0].name = "default";
+    profiles[0].isValid = true;
+    profiles[0].noteToKey[60].keyCode = KEY_H;
+    profiles[0].noteToKey[60].modifierMask = 0;
+    profiles[0].noteToKey[58].keyCode = KEY_G;
+    profiles[0].noteToKey[58].modifierMask = 0;
+    profileCount = 1;
+    currentProfileIndex = 0;
     return;
   }
   
-  File file;
-  bool fileFound = false;
-  String foundFileName = "";
+  // First pass: collect all mapping file names
+  String mappingFiles[MAX_PROFILES];
+  int fileCount = 0;
   
-  // Search through files in root directory
-  while (true) {
+  #ifdef ENABLE_DEBUG
+  Serial.println("Scanning SD card for mapping files...");
+  #endif
+  
+  while (fileCount < MAX_PROFILES) {
     File entry = root.openNextFile();
     if (!entry) {
       // No more files
@@ -285,73 +451,224 @@ void loadMappings() {
     
     // Get filename (must capture before closing entry)
     String fileName = String(entry.name());
-    fileName.toUpperCase();  // Convert to uppercase for case-insensitive comparison
+    String fileNameUpper = fileName;
+    fileNameUpper.toUpperCase();  // Convert to uppercase for case-insensitive comparison
+    
+    #ifdef ENABLE_DEBUG
+    Serial.print("Found file: ");
+    Serial.println(fileName);
+    #endif
+    
+    // Skip macOS metadata files (._ files)
+    if (fileName.startsWith("._")) {
+      #ifdef ENABLE_DEBUG
+      Serial.println("  -> Skipping macOS metadata file");
+      #endif
+      entry.close();
+      continue;
+    }
     
     // Check if filename contains "MAPPINGS" and ends with ".TXT"
-    if (fileName.indexOf("MAPPINGS") >= 0 && fileName.endsWith(".TXT")) {
-      // Found a mapping file - save filename, close directory entry, then open file for reading
-      foundFileName = String(entry.name());
-      entry.close();
-      file = SD.open(foundFileName.c_str(), FILE_READ);
-      if (file) {
-        fileFound = true;
-        break;
-      }
-    } else {
-      entry.close();
+    if (fileNameUpper.indexOf("MAPPINGS") >= 0 && fileNameUpper.endsWith(".TXT")) {
+      mappingFiles[fileCount] = fileName;
+      fileCount++;
+      #ifdef ENABLE_DEBUG
+      Serial.print("  -> Added as mapping file #");
+      Serial.println(fileCount);
+      #endif
     }
+    
+    entry.close();
   }
   
   root.close();
   
-  if (!fileFound) {
-    // No mapping file found - use fallback test mappings
-    noteToKey[60].keyCode = KEY_H;
-    noteToKey[60].modifierMask = 0;
-    noteToKey[58].keyCode = KEY_G;
-    noteToKey[58].modifierMask = 0;
+  #ifdef ENABLE_DEBUG
+  Serial.print("Total mapping files found: ");
+  Serial.println(fileCount);
+  #endif
+  
+  if (fileCount == 0) {
+    // No mapping files found - use fallback test mappings
+    profiles[0].name = "default";
+    profiles[0].isValid = true;
+    profiles[0].fastPressMode = config.fastPressMode;
+    profiles[0].pressDurationMs = config.pressDurationMs;
+    profiles[0].noteToKey[60].keyCode = KEY_H;
+    profiles[0].noteToKey[60].modifierMask = 0;
+    profiles[0].noteToKey[58].keyCode = KEY_G;
+    profiles[0].noteToKey[58].modifierMask = 0;
+    profileCount = 1;
+    currentProfileIndex = 0;
     return;
   }
   
-  // Load mappings from the found file
-  int mappingCount = 0;
-  
-  while (file.available()) {
-    String line = file.readStringUntil('\n');
-    line.trim();
-    
-    // Skip comments and empty lines
-    if (line.length() == 0 || line.startsWith("#")) {
-      continue;
+  // Second pass: load each mapping file as a separate profile
+  for (int fileIdx = 0; fileIdx < fileCount && profileCount < MAX_PROFILES; fileIdx++) {
+    File file = SD.open(mappingFiles[fileIdx].c_str(), FILE_READ);
+    if (!file) {
+      continue;  // Skip files that can't be opened
     }
     
-    // Parse: MIDI_NOTE=KEY_NAME
-    int equalsPos = line.indexOf('=');
-    if (equalsPos > 0) {
-      int note = line.substring(0, equalsPos).toInt();
-      String keyName = line.substring(equalsPos + 1);
+    // Extract profile name from filename (remove .txt extension)
+    String profileName = mappingFiles[fileIdx];
+    int dotPos = profileName.lastIndexOf('.');
+    if (dotPos > 0) {
+      profileName = profileName.substring(0, dotPos);
+    }
+    profileName.trim();
+    
+    // If profile name is empty, use a default
+    if (profileName.length() == 0) {
+      profileName = "mapping";
+    }
+    
+    // Create new profile for this file
+    int profileIdx = profileCount;
+    profiles[profileIdx].name = profileName;
+    profiles[profileIdx].isValid = true;
+    // Initialize with global config defaults from CONFIG.TXT
+    // These can be overridden by FAST_PRESS_MODE= and PRESS_DURATION= lines in the mapping file
+    profiles[profileIdx].fastPressMode = config.fastPressMode;
+    profiles[profileIdx].pressDurationMs = config.pressDurationMs;
+    profileCount++;
+    
+    // If this is the first profile, make it the active one
+    if (profileCount == 1) {
+      currentProfileIndex = 0;
+    }
+    
+    #ifdef ENABLE_DEBUG
+    Serial.print("Loading profile ");
+    Serial.print(profileCount);
+    Serial.print(": ");
+    Serial.print(profileName);
+    Serial.print(" from ");
+    Serial.println(mappingFiles[fileIdx]);
+    #endif
+    
+    // Load mappings from this file (ignore [profile_name] sections - each file is one profile)
+    int mappingCount = 0;
+    
+    while (file.available()) {
+      String line = file.readStringUntil('\n');
+      line.trim();
       
-      // Remove inline comments (everything after #)
-      int commentPos = keyName.indexOf('#');
-      if (commentPos >= 0) {
-        keyName = keyName.substring(0, commentPos);
+      // Skip empty lines
+      if (line.length() == 0) {
+        continue;
       }
-      keyName.trim();
       
-      // Validate MIDI note range (0-127)
-      if (note >= 0 && note < MAX_MIDI_NOTES) {
-        byte keyCode = 0;
-        byte modifierMask = 0;
-        if (parseKeyMapping(keyName, keyCode, modifierMask)) {
-          noteToKey[note].keyCode = keyCode;
-          noteToKey[note].modifierMask = modifierMask;
-          mappingCount++;
+      // Skip profile section headers (legacy support - they're ignored now)
+      if (line.startsWith("[") && line.endsWith("]")) {
+        continue;
+      }
+      
+      // Skip comments
+      if (line.startsWith("#")) {
+        continue;
+      }
+      
+      // Parse profile-specific settings: FAST_PRESS_MODE=value or PRESS_DURATION=value
+      // OR parse MIDI note mappings: MIDI_NOTE=KEY_NAME
+      int equalsPos = line.indexOf('=');
+      if (equalsPos > 0) {
+        String leftSide = line.substring(0, equalsPos);
+        String rightSide = line.substring(equalsPos + 1);
+        leftSide.trim();
+        rightSide.trim();
+        
+        // Check if it's a setting (not a MIDI note mapping)
+        // Settings have text keywords on the left side, MIDI notes are numbers 0-127
+        String leftUpper = leftSide;
+        leftUpper.toUpperCase();
+        
+        bool isSetting = false;
+        if (leftUpper == "FAST_PRESS_MODE" || leftUpper == "FASTPRESS") {
+          String value = rightSide;
+          value.toUpperCase();
+          profiles[profileIdx].fastPressMode = (value == "1" || value == "TRUE" || value == "ON" || value == "YES");
+          #ifdef ENABLE_DEBUG
+          Serial.print("  Profile fast-press mode: ");
+          Serial.println(profiles[profileIdx].fastPressMode ? "enabled" : "disabled");
+          #endif
+          isSetting = true;
+        }
+        else if (leftUpper == "PRESS_DURATION" || leftUpper == "DURATION") {
+          int duration = rightSide.toInt();
+          if (duration >= 0 && duration <= 1000) {
+            profiles[profileIdx].pressDurationMs = duration;
+            #ifdef ENABLE_DEBUG
+            Serial.print("  Profile press duration: ");
+            Serial.print(duration);
+            Serial.println("ms");
+            #endif
+          }
+          isSetting = true;
+        }
+        
+        if (isSetting) {
+          continue;  // Skip to next line, this was a setting
+        }
+        
+        // Not a setting, so it must be a MIDI note mapping: MIDI_NOTE=KEY_NAME
+        int note = leftSide.toInt();
+        String keyName = rightSide;
+        
+        // Remove inline comments (everything after #)
+        int commentPos = keyName.indexOf('#');
+        if (commentPos >= 0) {
+          keyName = keyName.substring(0, commentPos);
+        }
+        keyName.trim();
+        
+        // Validate MIDI note range (0-127)
+        if (note >= 0 && note < MAX_MIDI_NOTES) {
+          byte keyCode = 0;
+          byte modifierMask = 0;
+          if (parseKeyMapping(keyName, keyCode, modifierMask)) {
+            profiles[profileIdx].noteToKey[note].keyCode = keyCode;
+            profiles[profileIdx].noteToKey[note].modifierMask = modifierMask;
+            mappingCount++;
+          }
         }
       }
     }
+    
+    file.close();
+    #ifdef ENABLE_DEBUG
+    Serial.print("  -> Loaded ");
+    Serial.print(mappingCount);
+    Serial.println(" mappings");
+    #endif
   }
   
-  file.close();
+  // Ensure we have at least one profile
+  if (profileCount == 0) {
+    profiles[0].name = "default";
+    profiles[0].isValid = true;
+    profiles[0].fastPressMode = config.fastPressMode;
+    profiles[0].pressDurationMs = config.pressDurationMs;
+    profileCount = 1;
+    currentProfileIndex = 0;
+    #ifdef ENABLE_DEBUG
+    Serial.println("No profiles loaded - using fallback");
+    #endif
+  }
+  
+  #ifdef ENABLE_DEBUG
+  Serial.println("=== Profile Loading Complete ===");
+  Serial.print("Total profiles: ");
+  Serial.println(profileCount);
+  Serial.print("Active profile: ");
+  Serial.print(currentProfileIndex);
+  Serial.print(" (");
+  Serial.print(profiles[currentProfileIndex].name);
+  Serial.println(")");
+  Serial.print("Profile switch note: ");
+  Serial.println(config.profileSwitchNote);
+  Serial.println();
+  #endif
 }
 
 // Parse key name with optional modifiers (e.g., "SHIFT+F", "F+SHIFT", "CTRL+SPACE")
@@ -387,12 +704,20 @@ bool parseKeyMapping(String keyName, byte& keyCode, byte& modifierMask) {
   if (modifierStr.length() > 0) {
     if (modifierStr == "SHIFT" || modifierStr == "LEFTSHIFT") {
       modifierMask |= MODIFIERKEY_LEFTSHIFT;
+    } else if (modifierStr == "RSHIFT" || modifierStr == "RIGHTSHIFT") {
+      modifierMask |= MODIFIERKEY_RIGHTSHIFT;
     } else if (modifierStr == "CTRL" || modifierStr == "CONTROL" || modifierStr == "LEFTCTRL") {
       modifierMask |= MODIFIERKEY_LEFTCTRL;
+    } else if (modifierStr == "RCTRL" || modifierStr == "RIGHTCTRL") {
+      modifierMask |= MODIFIERKEY_RIGHTCTRL;
     } else if (modifierStr == "ALT" || modifierStr == "LEFTALT") {
       modifierMask |= MODIFIERKEY_LEFTALT;
+    } else if (modifierStr == "RALT" || modifierStr == "RIGHTALT") {
+      modifierMask |= MODIFIERKEY_RIGHTALT;
     } else if (modifierStr == "META" || modifierStr == "WIN" || modifierStr == "CMD" || modifierStr == "LEFTMETA") {
       modifierMask |= MODIFIERKEY_LEFTMETA;
+    } else if (modifierStr == "RMETA" || modifierStr == "RIGHTMETA") {
+      modifierMask |= MODIFIERKEY_RIGHTMETA;
     }
   }
   
@@ -434,6 +759,85 @@ bool parseKeyMapping(String keyName, byte& keyCode, byte& modifierMask) {
   }
   if (baseKey == "BACKSPACE" || baseKey == "BS") {
     keyCode = KEY_BACKSPACE;
+    return true;
+  }
+  
+  // Modifier keys as standalone keys (must be sent as modifiers, not key codes)
+  // USB HID keyboard protocol: modifiers are sent via modifier byte, not as key codes
+  if (baseKey == "LSHIFT" || baseKey == "LEFTSHIFT") {
+    keyCode = 0;  // No regular key, just the modifier
+    modifierMask = MODIFIERKEY_LEFTSHIFT;
+    return true;
+  }
+  if (baseKey == "RSHIFT" || baseKey == "RIGHTSHIFT") {
+    keyCode = 0;  // No regular key, just the modifier
+    modifierMask = MODIFIERKEY_RIGHTSHIFT;
+    return true;
+  }
+  if (baseKey == "LCTRL" || baseKey == "LEFTCTRL") {
+    keyCode = 0;  // No regular key, just the modifier
+    modifierMask = MODIFIERKEY_LEFTCTRL;
+    return true;
+  }
+  if (baseKey == "RCTRL" || baseKey == "RIGHTCTRL") {
+    keyCode = 0;  // No regular key, just the modifier
+    modifierMask = MODIFIERKEY_RIGHTCTRL;
+    return true;
+  }
+  if (baseKey == "LALT" || baseKey == "LEFTALT") {
+    keyCode = 0;  // No regular key, just the modifier
+    modifierMask = MODIFIERKEY_LEFTALT;
+    return true;
+  }
+  if (baseKey == "RALT" || baseKey == "RIGHTALT") {
+    keyCode = 0;  // No regular key, just the modifier
+    modifierMask = MODIFIERKEY_RIGHTALT;
+    return true;
+  }
+  if (baseKey == "LMETA" || baseKey == "LEFTMETA" || baseKey == "LWIN" || baseKey == "LCMD") {
+    keyCode = 0;  // No regular key, just the modifier
+    modifierMask = MODIFIERKEY_LEFTMETA;
+    return true;
+  }
+  if (baseKey == "RMETA" || baseKey == "RIGHTMETA" || baseKey == "RWIN" || baseKey == "RCMD") {
+    keyCode = 0;  // No regular key, just the modifier
+    modifierMask = MODIFIERKEY_RIGHTMETA;
+    return true;
+  }
+  
+  // Punctuation and special characters
+  if (baseKey == "COMMA" || baseKey == ",") {
+    keyCode = KEY_COMMA;
+    return true;
+  }
+  if (baseKey == "DOT" || baseKey == "PERIOD" || baseKey == ".") {
+    keyCode = KEY_DOT;
+    return true;
+  }
+  if (baseKey == "SLASH" || baseKey == "/" || baseKey == "?") {
+    // Note: "?" is typically SHIFT+/, but we'll map it to / for standalone use
+    // If you need actual ?, use SHIFT+SLASH or SHIFT+/
+    keyCode = KEY_SLASH;
+    return true;
+  }
+  if (baseKey == "MINUS" || baseKey == "-" || baseKey == "DASH") {
+    keyCode = KEY_MINUS;
+    return true;
+  }
+  if (baseKey == "EQUAL" || baseKey == "EQUALS" || baseKey == "=") {
+    keyCode = KEY_EQUAL;
+    return true;
+  }
+  if (baseKey == "LEFTBRACE" || baseKey == "LBRACE" || baseKey == "[") {
+    keyCode = KEY_LEFTBRACE;
+    return true;
+  }
+  if (baseKey == "RIGHTBRACE" || baseKey == "RBRACE" || baseKey == "]") {
+    keyCode = KEY_RIGHTBRACE;
+    return true;
+  }
+  if (baseKey == "BACKSLASH" || baseKey == "BSLASH" || baseKey == "\\") {
+    keyCode = KEY_BACKSLASH;
     return true;
   }
   
@@ -493,9 +897,13 @@ void removePressedKey(byte keyCode, byte modifierMask) {
 // Update the keyboard state with all currently pressed keys
 // Preserves order of key presses, batches consecutive keys with same modifier for speed
 // Optimized for fast execution: single send for all-same-modifier chords, batched sends for mixed modifiers
+// Combines modifier-only keys (LSHIFT, RSHIFT, etc.) with regular keys without replaying
 void updateKeyboardState() {
-  if (pressedKeyCount == 0) {
-    // No keys pressed - clear everything
+  // Combine modifier-only keys with regular key modifiers
+  // activeModifierKeys contains modifiers from standalone modifier keys (LSHIFT, RSHIFT, etc.)
+  
+  if (pressedKeyCount == 0 && activeModifierKeys == 0) {
+    // No keys pressed and no modifier-only keys - clear everything
     Keyboard.set_key1(0);
     Keyboard.set_key2(0);
     Keyboard.set_key3(0);
@@ -503,6 +911,19 @@ void updateKeyboardState() {
     Keyboard.set_key5(0);
     Keyboard.set_key6(0);
     Keyboard.set_modifier(0);
+    Keyboard.send_now();
+    return;
+  }
+  
+  if (pressedKeyCount == 0) {
+    // Only modifier-only keys active (no regular keys)
+    Keyboard.set_key1(0);
+    Keyboard.set_key2(0);
+    Keyboard.set_key3(0);
+    Keyboard.set_key4(0);
+    Keyboard.set_key5(0);
+    Keyboard.set_key6(0);
+    Keyboard.set_modifier(activeModifierKeys);
     Keyboard.send_now();
     return;
   }
@@ -517,6 +938,9 @@ void updateKeyboardState() {
     }
   }
   
+  // Combine regular key modifiers with modifier-only keys
+  byte combinedModifier = firstModifier | activeModifierKeys;
+  
   if (allSameModifier) {
     // All keys have same modifier - send them all at once (fastest)
     Keyboard.set_key1(0);
@@ -525,15 +949,21 @@ void updateKeyboardState() {
     Keyboard.set_key4(0);
     Keyboard.set_key5(0);
     Keyboard.set_key6(0);
-    Keyboard.set_modifier(firstModifier);
+    Keyboard.set_modifier(combinedModifier);
     
-    // Set all keys in order
-    if (pressedKeyCount > 0) Keyboard.set_key1(pressedKeys[0].keyCode);
-    if (pressedKeyCount > 1) Keyboard.set_key2(pressedKeys[1].keyCode);
-    if (pressedKeyCount > 2) Keyboard.set_key3(pressedKeys[2].keyCode);
-    if (pressedKeyCount > 3) Keyboard.set_key4(pressedKeys[3].keyCode);
-    if (pressedKeyCount > 4) Keyboard.set_key5(pressedKeys[4].keyCode);
-    if (pressedKeyCount > 5) Keyboard.set_key6(pressedKeys[5].keyCode);
+    // Set all keys in order (only keys with keyCode > 0)
+    int keyIdx = 0;
+    for (int i = 0; i < pressedKeyCount && keyIdx < MAX_SIMULTANEOUS_KEYS; i++) {
+      if (pressedKeys[i].keyCode > 0) {
+        if (keyIdx == 0) Keyboard.set_key1(pressedKeys[i].keyCode);
+        else if (keyIdx == 1) Keyboard.set_key2(pressedKeys[i].keyCode);
+        else if (keyIdx == 2) Keyboard.set_key3(pressedKeys[i].keyCode);
+        else if (keyIdx == 3) Keyboard.set_key4(pressedKeys[i].keyCode);
+        else if (keyIdx == 4) Keyboard.set_key5(pressedKeys[i].keyCode);
+        else if (keyIdx == 5) Keyboard.set_key6(pressedKeys[i].keyCode);
+        keyIdx++;
+      }
+    }
     
     Keyboard.send_now();
   } else {
@@ -556,18 +986,21 @@ void updateKeyboardState() {
         Keyboard.set_key4(0);
         Keyboard.set_key5(0);
         Keyboard.set_key6(0);
-        Keyboard.set_modifier(currentModifier);
+        // Combine regular key modifier with modifier-only keys
+        Keyboard.set_modifier(currentModifier | activeModifierKeys);
         
-        // Set keys in this batch (in order, max 6 keys per USB HID report)
+        // Set keys in this batch (in order, max 6 keys per USB HID report, only keyCode > 0)
         int keyIdx = 0;
         for (int j = startIdx; j < i && keyIdx < MAX_SIMULTANEOUS_KEYS; j++) {
-          if (keyIdx == 0) Keyboard.set_key1(pressedKeys[j].keyCode);
-          else if (keyIdx == 1) Keyboard.set_key2(pressedKeys[j].keyCode);
-          else if (keyIdx == 2) Keyboard.set_key3(pressedKeys[j].keyCode);
-          else if (keyIdx == 3) Keyboard.set_key4(pressedKeys[j].keyCode);
-          else if (keyIdx == 4) Keyboard.set_key5(pressedKeys[j].keyCode);
-          else if (keyIdx == 5) Keyboard.set_key6(pressedKeys[j].keyCode);
-          keyIdx++;
+          if (pressedKeys[j].keyCode > 0) {
+            if (keyIdx == 0) Keyboard.set_key1(pressedKeys[j].keyCode);
+            else if (keyIdx == 1) Keyboard.set_key2(pressedKeys[j].keyCode);
+            else if (keyIdx == 2) Keyboard.set_key3(pressedKeys[j].keyCode);
+            else if (keyIdx == 3) Keyboard.set_key4(pressedKeys[j].keyCode);
+            else if (keyIdx == 4) Keyboard.set_key5(pressedKeys[j].keyCode);
+            else if (keyIdx == 5) Keyboard.set_key6(pressedKeys[j].keyCode);
+            keyIdx++;
+          }
         }
         
         Keyboard.send_now();

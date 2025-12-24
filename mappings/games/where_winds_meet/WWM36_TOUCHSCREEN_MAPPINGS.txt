@@ -1,0 +1,56 @@
+# 36-Key Mode Mappings for Where Winds Meet (PlayCover macOS/Touchscreen)
+# 
+# For PlayCover on macOS - no modifiers, uses different keys for accidentals
+# Switch between mapping files by pressing MIDI note 24 (C1) - configurable in CONFIG.TXT
+#
+# Profile-specific settings:
+FAST_PRESS_MODE=false
+# Normal mode: keys are held as long as MIDI note is held (needed for touchscreen)
+#
+# Layout:
+# Bottom octave (C3-B3): LSHIFT, Z, X, C, V, B, N, M, ,, ., /, RSHIFT
+# Middle octave (C4-B4): Q, W, E, R, T, Y, U, I, O, P, [, ]
+# Top octave (C5-B5): 1, 2, 3, 4, 5, 6, 7, 8, 9, 0, -, =
+
+# Low Octave (C3-B3): MIDI notes 48-59
+48=LSHIFT  # C3
+49=z       # C#3
+50=x       # D3
+51=c       # D#3/Eb3
+52=v       # E3
+53=b       # F3
+54=n       # F#3
+55=m       # G3
+56=,       # G#3 (comma)
+57=.       # A3 (period)
+58=/       # A#3/Bb3 (slash, question mark is SHIFT+/)
+59=RSHIFT  # B3
+
+# Mid Octave (C4-B4): MIDI notes 60-71
+60=q       # C4 (Middle C)
+61=w       # C#4
+62=e       # D4
+63=r       # D#4/Eb4
+64=t       # E4
+65=y       # F4
+66=u       # F#4
+67=i       # G4
+68=o       # G#4
+69=p       # A4
+70=[       # A#4/Bb4 (left bracket)
+71=]       # B4 (right bracket)
+
+# High Octave (C5-B5): MIDI notes 72-83
+72=1       # C5
+73=2       # C#5
+74=3       # D5
+75=4       # D#5/Eb5
+76=5       # E5
+77=6       # F5
+78=7       # F#5
+79=8       # G5
+80=9       # G#5
+81=0       # A5
+82=-       # A#5/Bb5 (minus)
+83==       # B5 (equals)
+

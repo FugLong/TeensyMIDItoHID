@@ -37,6 +37,8 @@ Follow these steps to assemble your MIDI to HID translator (everything just slid
 - ✅ USB MIDI Host support (up to 4 MIDI devices simultaneously)
 - ✅ HID Keyboard output (appears as generic keyboard to PC)
 - ✅ Configurable MIDI note to keyboard key mappings via SD card
+- ✅ **Multiple mapping files** - each file becomes a profile, switch between them on the fly
+- ✅ **Per-profile fast-press mode** - each mapping file can have its own fast-press settings
 - ✅ Support for modifier keys (Shift, Ctrl, Alt, Meta/Win)
 - ✅ Polyphonic chord support (up to 6 simultaneous keys)
 - ✅ **Fast-press mode** for games that don't recognize held keys
@@ -50,10 +52,11 @@ Follow these steps to assemble your MIDI to HID translator (everything just slid
 Pre-configured mapping files are available in the `mappings/` folder:
 
 - **Where Winds Meet**
-  - 36-key mode (`WWM36_MAPPINGS.txt`) - Full chromatic scale with modifier keys
-  - 21-key mode (`WWM21_MAPPINGS.txt`) - Natural notes only
+  - 36-key mode:
+    - `WWM36_DEFAULT_MAPPINGS.txt` - For PC (uses Shift/Ctrl modifiers for accidentals)
+    - `WWM36_TOUCHSCREEN_MAPPINGS.txt` - For PlayCover macOS (no modifiers)
 
-To use these mappings, copy the desired file to your SD card root and rename it to any name containing "MAPPINGS" with a `.txt` extension.
+To use these mappings, copy the desired file(s) to your SD card root. You can have multiple mapping files on the SD card and switch between them by pressing the profile switch note (default: C1 = note 24, configurable in CONFIG.TXT).
 
 ## Prerequisites
 
@@ -148,8 +151,9 @@ PRESS_DURATION=0
 **Settings:**
 - `FAST_PRESS_MODE` - `true`/`false`, `1`/`0`, `ON`/`OFF`, `YES`/`NO` (case-insensitive)
 - `PRESS_DURATION` - `0` to `1000` milliseconds
+- `PROFILE_SWITCH_NOTE` - MIDI note number (0-127) to trigger profile switching, or `255` to disable
 
-If `CONFIG.TXT` is missing, defaults are used: `FAST_PRESS_MODE=true`, `PRESS_DURATION=0`
+If `CONFIG.TXT` is missing, defaults are used: `FAST_PRESS_MODE=true`, `PRESS_DURATION=0`, `PROFILE_SWITCH_NOTE=24` (C1)
 
 ### Fast-Press Mode Explained
 
@@ -162,6 +166,9 @@ If `CONFIG.TXT` is missing, defaults are used: `FAST_PRESS_MODE=true`, `PRESS_DU
 - `PRESS_DURATION=0`: Immediate press/release (recommended)
 - `PRESS_DURATION=50`: Hold for 50ms then release
 - Useful for games that don't recognize held keys (like Where Winds Meet)
+
+**Per-Profile Settings:**
+Each mapping file can override global settings by including `FAST_PRESS_MODE=` and/or `PRESS_DURATION=` at the top. If not specified, uses global settings from `CONFIG.TXT`. Useful for different behaviors per profile (e.g., fast-press for PC, normal mode for touchscreen).
 
 ### Creating Custom Mappings
 
@@ -197,6 +204,17 @@ Mapping files use a simple `MIDI_NOTE=KEY_NAME` format:
 62=J  # D4 -> J key
 ```
 
+**With Per-Profile Settings (optional):**
+```
+# Override global settings for this profile
+FAST_PRESS_MODE=false
+PRESS_DURATION=0
+
+# MIDI note mappings
+60=H      # Middle C -> H key
+62=J      # D4 -> J key
+```
+
 #### Supported Key Names
 
 **Letters:** `A` through `Z` (case-insensitive)
@@ -219,6 +237,32 @@ Mapping files use a simple `MIDI_NOTE=KEY_NAME` format:
 **Modifier Format:**
 - `SHIFT+KEY` or `KEY+SHIFT` - Both formats work
 - Example: `SHIFT+A` or `A+SHIFT` both map to Shift+A
+
+#### Multiple Mapping Files
+
+You can place multiple mapping files on your SD card, and each file becomes a separate profile. This allows you to switch between different key mappings on the fly. This is useful for:
+- **PC vs macOS/PlayCover**: Some platforms (like PlayCover on macOS) don't support modifier key combinations (Shift/Ctrl), so you can create separate mapping files
+- **Different game modes**: Switch between different control schemes
+- **Different keyboard layouts**: Support multiple keyboard layouts
+
+**File-Based Profiles:**
+- Each `.txt` file containing "MAPPINGS" in its name becomes one profile
+- Profile name is derived from the filename (without `.txt` extension)
+- Example: `WWM36_DEFAULT_MAPPINGS.txt` becomes profile "WWM36_DEFAULT_MAPPINGS"
+- Example: `WWM36_TOUCHSCREEN_MAPPINGS.txt` becomes profile "WWM36_TOUCHSCREEN_MAPPINGS"
+
+**Switching Between Mapping Files:**
+- Press the profile switch note (default: **C1 = note 24**, configurable in `CONFIG.TXT`) to cycle through all mapping files
+- The first mapping file found is loaded by default
+- All currently pressed keys are released when switching between files
+- Up to 8 mapping files are supported
+
+**Example:**
+Place both files on your SD card:
+- `WWM36_DEFAULT_MAPPINGS.txt` - For PC with modifiers
+- `WWM36_TOUCHSCREEN_MAPPINGS.txt` - For PlayCover macOS without modifiers
+
+Press the profile switch note (default: C1 = note 24) to switch between them!
 
 #### MIDI Note Reference
 

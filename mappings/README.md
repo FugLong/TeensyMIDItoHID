@@ -8,8 +8,8 @@ This folder contains mapping files organized by game. Mapping files define how M
 mappings/
 └── games/
     └── where_winds_meet/
-        ├── WWM21_MAPPINGS.txt  (21-key mode)
-        └── WWM36_MAPPINGS.txt  (36-key mode)
+        ├── WWM36_DEFAULT_MAPPINGS.txt  (36-key mode, PC)
+        └── WWM36_TOUCHSCREEN_MAPPINGS.txt  (36-key mode, PlayCover macOS)
 ```
 
 ## Usage
@@ -29,12 +29,31 @@ The code will automatically find and load the first matching file it encounters 
 
 Mapping files use a simple format: `MIDI_NOTE=KEY_NAME`
 
+**Each file = One profile:**
 ```
 # Comments start with #
 60=H      # MIDI note 60 (Middle C) -> H key
 62=J      # MIDI note 62 (D4) -> J key
 64=K      # MIDI note 64 (E4) -> K key
 ```
+
+**Multiple Mapping Files:**
+- Place multiple `.txt` files containing "MAPPINGS" in their names on your SD card
+- Each file becomes a separate profile
+- Profile name is derived from the filename (without `.txt` extension)
+- Example: `WWM36_DEFAULT_MAPPINGS.txt` → profile "WWM36_DEFAULT_MAPPINGS"
+- Example: `WWM36_TOUCHSCREEN_MAPPINGS.txt` → profile "WWM36_TOUCHSCREEN_MAPPINGS"
+
+**Switching Between Files:**
+- Press **MIDI note 12 (C0)** (configurable in `CONFIG.TXT`) to cycle through all mapping files
+- The first mapping file found is loaded by default
+- All currently pressed keys are released when switching between files
+- Up to 8 mapping files are supported
+
+**Use Cases:**
+- **PC vs macOS/PlayCover**: Some platforms don't support modifier key combinations, so create separate files
+- **Different game modes**: Switch between different control schemes
+- **Different keyboard layouts**: Support multiple keyboard layouts
 
 ### Supported Key Names
 

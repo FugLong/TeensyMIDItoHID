@@ -5,6 +5,7 @@
 # If this file is missing, default values will be used:
 #   FAST_PRESS_MODE=true
 #   PRESS_DURATION=0
+#   PROFILE_SWITCH_NOTE=24 (C1)
 
 # Fast-press mode: If true, keys are pressed/released quickly regardless of MIDI duration
 # Useful for games that don't recognize held keys (like Where Winds Meet)
@@ -16,6 +17,13 @@ FAST_PRESS_MODE=true
 # 1-1000 = hold for specified duration before releasing
 # Only applies when FAST_PRESS_MODE=true
 PRESS_DURATION=0
+
+# Profile switch note: MIDI note number to trigger profile switching
+# Default: 24 (C1) - change to match your keyboard's lowest C key
+# Valid range: 0-127 (any MIDI note)
+# Press this MIDI note to cycle through available profiles in mapping files
+# Set to 255 to disable profile switching
+PROFILE_SWITCH_NOTE=24
 
 # Examples:
 #

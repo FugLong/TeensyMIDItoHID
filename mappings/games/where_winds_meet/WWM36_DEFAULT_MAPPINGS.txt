@@ -1,6 +1,9 @@
-# 36-Key Mode Mappings for Where Winds Meet
+# 36-Key Mode Mappings for Where Winds Meet (PC/Default)
 # Based on the open source WWM MIDI Player mappings
 # 
+# For PC - uses Shift/Ctrl modifiers for accidentals
+# Switch between mapping files by pressing MIDI note 12 (C0) - configurable in CONFIG.TXT
+#
 # Format: MIDI_NOTE=KEY_NAME
 # Natural notes use normal keys, accidentals use Shift/Ctrl modifiers
 #
@@ -50,3 +53,4 @@
 81=y      # A5
 82=CTRL+U  # A#5/Bb5
 83=u      # B5
+

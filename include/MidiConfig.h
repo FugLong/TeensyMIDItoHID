@@ -14,6 +14,12 @@
 // Limited by USB HID keyboard report size (6 keys + modifiers)
 #define MAX_SIMULTANEOUS_KEYS 6
 
+// Maximum number of profiles per mapping file
+#define MAX_PROFILES 8
+
+// MIDI note for profile switching (default: C1 = note 24, configurable via CONFIG.TXT)
+#define PROFILE_SWITCH_NOTE 24
+
 // Configuration file names on SD card
 #define CONFIG_FILE_NAME "CONFIG.TXT"
 #define MAPPINGS_FILE_NAME "MAPPINGS.TXT"
